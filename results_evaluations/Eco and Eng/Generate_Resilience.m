@@ -9,7 +9,6 @@ dataPath = fullfile('..','..', 'data');
 % Load all the .mat files from the data folder
 load(fullfile(dataPath, 'PAR.mat'));
 load(fullfile(dataPath, 'CurvR.mat'));
-load(fullfile(dataPath, 'PAR.mat'));
 load(fullfile(dataPath, 'Rdp.mat'));
 load(fullfile(dataPath, 'xmax.mat'));
 load(fullfile(dataPath, 'xmin.mat'));
