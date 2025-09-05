@@ -59,12 +59,12 @@ Sus = Vector{Float64}(Susc[:, 1])
 function gLV1(t, x, par)
     M = par.M
     μ = par.μ
-    return x .* (μ .+ M * x)
+    x .* (μ .+ M * x)
 end
 
 function gLV2(t, x, par)
     M, μ, Sus = par.M, par.μ, par.Sus
-    μ1 = (t > 0.1 && t <= 1.0) ? (μ .- Sus) : μ
+    μ1 = (t > 0.1 && t <= 0.2) ? (μ .+ Sus) : μ
     
     return x .* (μ1 .+ M * x)
 end
@@ -117,7 +117,116 @@ function get_init_alltaxa(df; pop::Int, time, rep::Int)
 end
 
 # Example:
-taxa_names, x0 = get_init_alltaxa(dataset; pop=3, time=1, rep=1);
+taxa_names, x0 = get_init_alltaxa(dataset; pop=3, time=0.0, rep=1);
 
 
 ##try simulation
+
+# ========= run gLV1 for population 1, replicate 1 =========
+# initial conditions at time = 1 (change to 0 if that is your first timepoint)
+taxa_names, x0 = get_init_alltaxa(dataset; pop=1, time=0.0, rep=1)
+
+L = length(x0)
+@assert length(μ) == L
+@assert size(M,1) == L == size(M,2)
+@assert length(Sus) == L
+
+par   = (M=M, μ=μ, Sus=Sus)
+α     = ones(L)          # order 1.0 => classical (non-fractional) case
+tspan = [0.0, 300.0]
+h     = 0.01
+
+t, X = FDEsolver(gLV1, tspan, x0, α, par)
+
+using Colors, Plots
+
+# Define mapping from taxon → color (hex or named)
+taxa_colors = Dict(
+    "Barnesiella"            => colorant"darkgreen",
+    "und_Lachnospiraceae"    => colorant"mediumaquamarine",
+    "uncl_Lachnospiraceae"   => colorant"paleturquoise2",
+    "Other"                  => colorant"gray40",            # close to #696969
+    "Blautia"                => colorant"salmon",
+    "und_uncl_Mollicutes"    => colorant"yellow4",
+    "Akkermansia"            => colorant"plum4",
+    "Coprobacillus"          => colorant"violetred",
+    "Clostridium_difficile"  => colorant"firebrick4",
+    "Enterococcus"           => colorant"green4",
+    "und_Enterobacteriaceae" => colorant"goldenrod4"
+)
+
+
+# Extract the colors in the right order
+palette = [taxa_colors[name] for name in taxa_names]
+
+
+
+p = plot(xlabel="Time", ylabel="Abundance",
+         title="gLV1: Population 1, Replicate 1",
+         legend=:outerright)
+
+for (i, name) in enumerate(taxa_names)
+    plot!(p, t, X[:, i], label=name, lw=2)
+end
+
+display(p)
+
+p = plot(xlabel="Time", ylabel="Abundance",     seriescolor=palette,
+         title="gLV1: Population 1, Replicate 1",
+         legend=:outerright)
+
+cum = zeros(size(X, 1))               # running baseline
+for i in 1:size(X, 2)                  # each taxon (column)
+    top = cum .+ X[:, i]
+    plot!(p, t, top; fillrange=cum, lw=0, label=taxa_names[i], seriescolor=palette[i])
+    cum = top
+end
+
+display(p)
+
+pop = 3
+rep = 2
+
+# 1) columns for this pop & replicate
+cols = [c for c in names(dataset)[2:end-2] if startswith(String(c), string(pop)) && dataset[1, c] == rep]
+
+# 2) get times from row 3, drop missings, sort by time
+times_raw = [dataset[3, c] for c in cols]
+mask      = .!ismissing.(times_raw)
+cols      = cols[mask]
+times     = Float64.(times_raw[mask])
+
+# 3) build Y (T × L): values of each taxon across those columns
+
+function values_for_taxon(df, taxon, cols)
+    r = findfirst(==(taxon), df[!, 1])  # find row with the taxon name
+    r === nothing && error("Taxon not found: $taxon")
+    [Float64(df[r, c]) for c in cols]
+end
+
+Y = hcat([values_for_taxon(dataset, t, cols) for t in taxa_names]...)  # T × L
+
+# 4) stacked bar plot
+bar(times, Y;
+    bar_position=:stack,
+    label=false,               # or "" to hide legend
+    seriescolor=palette',
+    lw=0,
+    framestyle=:box,
+   #size=(900, 220)
+)
+
+
+# Row sums = total abundance at each timepoint
+totals = sum(Y, dims=2)[:]   # convert to Vector
+
+# Plot as barplot
+bar(times, totals;
+    label = "Total abundance",
+    lw = 0,
+    framestyle = :box,
+    xlabel = "Time",
+    ylabel = "Total abundance",
+    color = :gray70,
+    #ize = (900, 220)
+)
