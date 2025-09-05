@@ -12,9 +12,6 @@ data = DataFrame(XLSX.readtable(xlsx_file, "Y"))
 # Write to CSV
 CSV.write(csv_file, data)
 
-println("Saved sheet Y as sheet_Y.csv")
-
-
 # Read sheet "MmuE"
 
 # Open the workbook
@@ -35,3 +32,6 @@ growth = DataFrame(Growth = data[3:13, 13])
 # susceptibilities as a DataFrame
 suscep = DataFrame(suscep = data[3:13, 14])
 
+CSV.write("interaction.csv", interaction)
+CSV.write("growth.csv", growth)
+CSV.write("suscep.csv", suscep)
