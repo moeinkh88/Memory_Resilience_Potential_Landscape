@@ -2,6 +2,7 @@ using FdeSolver              # pkg> add FdeSolver
 using Plots                  # pkg> add Plots
 using Random                 # for reproducibility
 using DataFrames, CSV        # pkg> add DataFrames CSV
+using SpecialFunctions       # pkg> add SpecialFunctions
 
 # --------------------------
 # global model parameters
@@ -19,11 +20,11 @@ tSpan         = (0.0, t_end)
 sample_times  = collect(0.0:1.0:t_end)         # a few snapshots up to 15
 h             = 0.01                          # solver step
 nc_corr       = 3
-replicates    = 3
+replicates    = 50
 noise_sigma   = 0.05                          # white noise std at measurement times
 
 # fractional derivative orders
-orders = [0.94, 0.95, 0.96, 0.97]
+orders = [0.7, 0.8, 0.9, 0.97, 1.0]
 
 # scenarios
 # 1 to 4: rho=0.35, A(0)=2.0, pulse rho=0.25 from t in [3,5]
@@ -47,10 +48,16 @@ end
 
 # right hand side
 function QS_RHS(t, y, par)
-    V, K, A0, ρ_fun = par
+    V, K, A0, ρ_fun, alpha, h, noise_sigma, rng = par
     A = y
     ρ = ρ_fun(t)
-    return V .* A.^2 ./ (K .+ A.^2) .+ A0 .- decay(ρ) .* A
+    det = V .* A.^2 ./ (K .+ A.^2) .+ A0 .- decay(ρ) .* A
+    if noise_sigma > 0
+        noise = noise_sigma .* gamma(alpha .+ 1) ./ (h .^ (alpha .- 0.5)) .* randn(rng)
+        return det .+ noise
+    else
+        return det
+    end
 end
 
 # simple linear interpolation for measurements at requested times
@@ -83,8 +90,10 @@ end
 function run_experiment(exp_id::Int, α::Float64, sc; seed=42)
     rng = MersenneTwister(seed)
     ρ_fun = make_rho_fun(sc.rho_base; pert=sc.pert)
-    par   = (V, K, A0p, ρ_fun)
-    t, Aapp = FDEsolver(QS_RHS, [tSpan[1], tSpan[2]], sc.Ainit, α, par; h=h, nc=nc_corr)
+
+    # deterministic run for A_true
+    par_det = (V, K, A0p, ρ_fun, α, h, 0.0, rng)
+    t, Aapp = FDEsolver(QS_RHS, [tSpan[1], tSpan[2]], sc.Ainit, α, par_det; h=h, nc=nc_corr)
 
     # noiseless truth at sample times
     A_true = interp_at(t, Aapp, sample_times)
@@ -98,9 +107,12 @@ function run_experiment(exp_id::Int, α::Float64, sc; seed=42)
     rho_at_t = [ρ_fun(tt) for tt in sample_times]
 
     for r in 1:replicates
-        # new noise stream per replicate
-        ε = randn(rng, length(sample_times)) .* noise_sigma
-        A_obs = clamp.(A_true .+ ε, 0.0, Inf)   # force nonnegative
+        # new rng per replicate
+        rng_r = MersenneTwister(seed + r)
+        par_stoch = (V, K, A0p, ρ_fun, α, h, noise_sigma, rng_r)
+        t_r, Aapp_r = FDEsolver(QS_RHS, [tSpan[1], tSpan[2]], sc.Ainit, α, par_stoch; h=h, nc=nc_corr)
+        A_stoch = interp_at(t_r, Aapp_r, sample_times)
+        A_obs = clamp.(A_stoch, 0.0, Inf)   # force nonnegative
         for (k, tt) in enumerate(sample_times)
             ρp = sc.pert === nothing ? NaN : sc.pert[3]
             t_on = sc.pert === nothing ? NaN : sc.pert[1]
@@ -125,25 +137,8 @@ for (gi, sc) in enumerate(scenarios)
 end
 
 # save CSV
-CSV.write("qs_bistable_dataset.csv", all_rows)
-println("Saved qs_bistable_dataset.csv with ", nrow(all_rows), " rows.")
-
-# quick visualization of one case to sanity check
-# ex_pick = 1
-# df1 = all_rows[all_rows.exp_id .== ex_pick, :]
-# plt = plot(title="Experiment $(ex_pick)  scenario=$(df1.scenario[1])  alpha=$(df1.alpha[1])",
-#            xlabel="time", ylabel="A")
-# # one noiseless series drawn once
-# true_series = combine(groupby(df1, :t), :A_true => first => :A_true)
-# plot!(true_series.t, true_series.A_true, lw=3, label="true")
-
-# # draw replicates
-# for r in 1:replicates
-#     dfr = df1[df1.replicate .== r, :]
-#     scatter!(dfr.t, dfr.A_obs, label="rep $r", markersize=4)
-# end
-# display(plt)
-
+CSV.write("qs_bistable_dataset1.csv", all_rows)
+println("Saved qs_bistable_dataset1.csv with ", nrow(all_rows), " rows.")
 
 using Plots
 mkpath("plots")
@@ -162,12 +157,15 @@ for ex_id in exp_ids
 
     # true (noiseless) series once
     true_series = combine(groupby(df1, :t), :A_true => first => :A_true)
-    plot!(plt, true_series.t, true_series.A_true, lw=3, label="true")
+    # plot!(plt, true_series.t, true_series.A_true, lw=3, label="true")
+    plot!(plt, true_series.t, true_series.A_true, lw=3, label=false)
 
     # replicates
     for r in reps
         dfr = df1[df1.replicate .== r, :]
-        scatter!(plt, dfr.t, dfr.A_obs, markersize=4, label="rep $r")
+        # scatter!(plt, dfr.t, dfr.A_obs, markersize=4, label="rep $r")
+        # scatter!(plt, dfr.t, dfr.A_obs, markersize=4, label=false)
+        plot!(plt, dfr.t, dfr.A_obs, markersize=4, label=false)
     end
 
     # mark perturbation window if present
