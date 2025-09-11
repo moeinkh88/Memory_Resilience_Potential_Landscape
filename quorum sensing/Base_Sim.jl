@@ -14,10 +14,10 @@ A0p = 0.05           # basal production (named A0p to avoid clash with A(t))
 ρs  = [0.1, 0.2, 0.3, 0.4, 0.5]   # densities to compare
 tSpan = [0.0, 10.0]  # time window
 Ainit = 2         # initial A
-α = .8              # derivative order (ODE case)
+α = 1.0              # derivative order (ODE case)
 
 # decay function exactly as in your message
-decay(ρ) = .1 + (1 - ρ) / (ρ * (2 - ρ))     # note: singular at ρ→0
+decay(ρ) = 0.1 + (1 - ρ) / (ρ * (2 - ρ))     # note: singular at ρ→0
 
 # If you actually intended kA = 1 with the original paper’s d(ρ) = 1 + (1-ρ)/(ρ(2-ρ)),
 # then replace the line above with:
@@ -28,7 +28,7 @@ decay(ρ) = .1 + (1 - ρ) / (ρ * (2 - ρ))     # note: singular at ρ→0
 function QS_RHS(t, y, par)
     V, K, A0p, ρ = par
     A = y
-    return V .* A.^2 / (K .+ A.^2) .+ A0p - decay(ρ) * A
+    return V .* A.^2 / (K .+ A.^2) .+ A0p .- decay(ρ) * A
 end
 
 # solve and plot for multiple rho

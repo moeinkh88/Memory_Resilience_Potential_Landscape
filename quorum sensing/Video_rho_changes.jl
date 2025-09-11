@@ -15,36 +15,40 @@ A0p = 0.05
 decay(ρ) = 0.1 + (1 - ρ) / (ρ * (2 - ρ))      # singular at ρ -> 0
 
 # time grid and measurement settings
-t_end         = 20.0
+t_end         = 650.0
 tSpan         = (0.0, t_end)
 sample_times  = collect(0.0:1.0:t_end)         # a few snapshots up to 15
 h             = 0.01                          # solver step
 nc_corr       = 3
-replicates    = 50
-noise_sigma   = 0.05                          # white noise std at measurement times
+replicates    = 1
+noise_sigma   = .15                          # white noise std at measurement times
 
 # fractional derivative orders
-orders = [0.7, 0.8, 0.9, 0.97, 1.0]
+orders = [0.8, 1.0]
 
-# scenarios
-# 1 to 4: rho=0.35, A(0)=2.0, pulse rho=0.25 from t in [3,5]
-# 5 to 8: rho=0.40, A(0)=0.05, pulse rho=0.55 from t in [3,5]
-# 9 to 12: rho=0.45, A(0)=2.0, no pulse
-const scenarios = [
-    (label="S1", rho_base=0.35, Ainit=2.0,  pert=(3.0, 5.0, 0.2)),
-    (label="S2", rho_base=0.3, Ainit=0.5, pert=(3.0, 5.0, 0.6)),
-    (label="S3", rho_base=0.45, Ainit=2.0,  pert=nothing)
-]
+# single scenario with constant rho, no perturbation
+const scenario = (label="S", rho_base=0.35, Ainit=2.0, pert=nothing)
 
-# rho schedule
-make_rho_fun(rho_base; pert=nothing) = t -> begin
-    if pert === nothing
-        return rho_base
+# rho schedule (stepwise changing)
+function rho_fun(t)
+    if t < 40
+        0.4
+    elseif t < 180
+        0.35
+    elseif t < 280
+        0.3
+    elseif t < 380
+        0.28690578325768207
+    elseif t < 400
+        0.3
+    elseif t < 480
+        0.35
     else
-        t_on, t_off, rho_pert = pert
-        return (t ≥ t_on && t ≤ t_off) ? rho_pert : rho_base
+        0.4
     end
 end
+
+make_rho_fun(rho_base; pert=nothing) = rho_fun
 
 # right hand side
 function QS_RHS(t, y, par)
@@ -86,7 +90,7 @@ function interp_at(ts_in, ys_in, tq_in)
 end
 
 
-# run one experiment for given alpha, scenario, and replicates
+# run one experiment for given alpha and replicates
 function run_experiment(exp_id::Int, α::Float64, sc; seed=42)
     rng = MersenneTwister(seed)
     ρ_fun = make_rho_fun(sc.rho_base; pert=sc.pert)
@@ -125,23 +129,20 @@ function run_experiment(exp_id::Int, α::Float64, sc; seed=42)
     return rows
 end
 
-# assemble all 12 experiments
+# assemble experiments for each alpha
 all_rows = DataFrame()
 exp_counter = 0
-for (gi, sc) in enumerate(scenarios)
-    for α in orders
-        exp_counter += 1
-        df = run_experiment(exp_counter, α, sc; seed=1000 + 17*exp_counter)
-        append!(all_rows, df)
-    end
+for α in orders
+    exp_counter += 1
+    df = run_experiment(exp_counter, α, scenario; seed=1000 + 17*exp_counter)
+    append!(all_rows, df)
 end
 
-# save CSV
-CSV.write("qs_bistable_dataset1.csv", all_rows)
-println("Saved qs_bistable_dataset1.csv with ", nrow(all_rows), " rows.")
-
 using Plots
+gr()
 mkpath("plots")
+
+A_range = collect(0:0.01:4)
 
 exp_ids = sort(unique(all_rows.exp_id))
 
@@ -152,35 +153,38 @@ for ex_id in exp_ids
     αval  = df1.alpha[1]
     reps  = sort(unique(df1.replicate))
 
-    plt = plot(title = "Experiment $(ex_id)  scenario=$(scen)  alpha=$(round(αval,digits=2))",
-               xlabel = "time", ylabel = "A", legend = :topright)
+    dfr = df1[df1.replicate .== 1, :]  # single replicate
 
-    # true (noiseless) series once
-    true_series = combine(groupby(df1, :t), :A_true => first => :A_true)
-    # plot!(plt, true_series.t, true_series.A_true, lw=3, label="true")
-    plot!(plt, true_series.t, true_series.A_true, lw=3, label=false)
+    t_vals = dfr.t
+    A_obs = dfr.A_obs
+    rho_at_t = dfr.rho
 
-    # replicates
-    for r in reps
-        dfr = df1[df1.replicate .== r, :]
-        # scatter!(plt, dfr.t, dfr.A_obs, markersize=4, label="rep $r")
-        # scatter!(plt, dfr.t, dfr.A_obs, markersize=4, label=false)
-        plot!(plt, dfr.t, dfr.A_obs, markersize=4, label=false)
+    anim = @animate for i = 1:2:length(t_vals)  # step to speed up animation
+        # Current rho
+        current_rho = rho_at_t[i]
+        d = decay(current_rho)
+
+        # Compute current potential
+        U = - ( V .* (A_range .- sqrt(K) .* atan.(A_range ./ sqrt(K))) .+ A0p .* A_range .- (d / 2) .* A_range.^2 )
+        U = U .- minimum(U)  # shift to min 0
+
+        # Potential plot with fill and ball
+        p1 = plot(A_range, U, title="Potential Landscape (rho=$(round(current_rho, digits=2)))", xlabel="A", ylabel="U(A)", lw=2, color=:black, legend=false,
+                  ylims=(-0.05, maximum(U)+0.05))
+        plot!(p1, A_range, U, fillrange=minimum(U)-0.05, fillalpha=0.3, c=:purple)
+        scatter!(p1, [A_obs[i]], [U[argmin(abs.(A_range .- A_obs[i]))]], markersize=10, color=:black)
+
+        # Trajectory plot: A vs time (time increasing downward)
+        p2 = plot(A_obs[1:i], t_vals[1:i], title="Dynamics", xlabel="A", ylabel="Time (days)", lw=2, color=:blue, legend=false,
+                  yflip=true, xlims=(0, 4), ylims=(0, t_end))
+
+        plot(p1, p2, layout=(2,1), size=(800, 600))
     end
 
-    # mark perturbation window if present
-    has_pert = any(.!isnan.(df1.pert_on)) && any(.!isnan.(df1.pert_off))
-    if has_pert
-        t_on  = first(df1.pert_on[.!isnan.(df1.pert_on)])
-        t_off = first(df1.pert_off[.!isnan.(df1.pert_off)])
-        vline!(plt, [t_on, t_off], lc=:gray, ls=:dash, label=false)
-    end
-
-    # save + show
+    # Save as GIF
     scen_safe = replace(string(scen), r"[^\w]+" => "_")
     α_safe    = replace(string(round(αval,digits=2)), "." => "-")
-    fn = "plots/exp_$(lpad(ex_id,2,'0'))_$(scen_safe)_alpha$(α_safe).png"
-    savefig(plt, fn)
-    display(plt)
+    fn = "plots/pert_dynamics_alpha$(α_safe).gif"
+    gif(anim, fn, fps=15)
     @info "saved $fn"
 end
