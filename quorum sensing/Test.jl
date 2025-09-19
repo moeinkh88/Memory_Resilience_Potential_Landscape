@@ -16,36 +16,28 @@ A0p = 0.05
 decay(ρ) = 0.1 + (1 - ρ) / (ρ * (2 - ρ))      # singular at ρ -> 0
 
 # time grid and measurement settings
-t_end         = 650.0
+t_end         = 1000.0
 tSpan         = (0.0, t_end)
 sample_times  = collect(0.0:1.0:t_end)         # a few snapshots up to 15
 h             = 0.01                          # solver step
 nc_corr       = 3
 replicates    = 1
-noise_sigma   = .09                          # white noise std at measurement times
+noise_sigma   = 1                          # white noise std at measurement times
 
 # fractional derivative orders
-orders = [0.8, 1.0]
+orders = [0.5, 1.0]
 
 # single scenario with constant rho, no perturbation
 const scenario = (label="S", rho_base=0.35, Ainit=2.0, pert=nothing)
 
 # rho schedule (stepwise changing)
 function rho_fun(t)
-    if t < 40
-        0.4
-    elseif t < 180
-        0.35
-    elseif t < 280
-        0.3
-    elseif t < 450
-        0.28690578325768207
-    elseif t < 500
-        0.3
-    elseif t < 550
-        0.35
-    else
-        0.4
+    if t < 10000
+    #     0.4
+    # elseif t < 500
+    #     0.28
+    # else
+        0.287
     end
 end
 
@@ -58,7 +50,8 @@ function QS_RHS(t, y, par)
     ρ = ρ_fun(t)
     det = V .* A.^2 ./ (K .+ A.^2) .+ A0 .- decay(ρ) .* A
     if noise_sigma > 0
-        noise = noise_sigma .* gamma(alpha .+ 1) ./ (h .^ (alpha .- 0.5)) .* randn(rng)
+        # noise = noise_sigma .* gamma(alpha .+ 1) ./ (h .^ (alpha .- 0.5)) .* randn(rng)
+                noise = noise_sigma .* randn(rng)
         return det .+ noise
     else
         return det
@@ -172,57 +165,67 @@ end
 
 A_range = collect(0:0.01:4)
 
-exp_ids = sort(unique(all_rows.exp_id))
+# Extract data for all orders
+A_obs_dict = Dict{Float64, Vector{Float64}}()
+rho_at_t_dict = Dict{Float64, Vector{Float64}}()
+t_vals_dict = Dict{Float64, Vector{Float64}}()
+for α in orders
+    df = all_rows[all_rows.alpha .== α, :]
+    dfr = df[df.replicate .== 1, :]
+    A_obs_dict[α] = vec(dfr.A_obs)
+    rho_at_t_dict[α] = vec(dfr.rho)
+    t_vals_dict[α] = vec(dfr.t)
+end
 
-for ex_id in exp_ids
-    df1 = all_rows[all_rows.exp_id .== ex_id, :]
+# Assume t_vals and rho_at_t are the same across alphas
+t_vals = t_vals_dict[orders[1]]
+rho_at_t = rho_at_t_dict[orders[1]]
 
-    scen  = df1.scenario[1]
-    αval  = df1.alpha[1]
-    reps  = sort(unique(df1.replicate))
+anim = @animate for i = 1:15:length(t_vals)  # step to speed up animation
+    # Current rho (same for all)
+    current_rho = rho_at_t[i]
+    d = decay(current_rho)
 
-    dfr = df1[df1.replicate .== 1, :]  # single replicate
+    # Compute current potential (same for all since independent of alpha)
+    U = - ( V .* (A_range .- sqrt(K) .* atan.(A_range ./ sqrt(K))) .+ A0p .* A_range .- (d / 2) .* A_range.^2 )
+    U = U .- minimum(U) # shift to min 0
 
-    t_vals = dfr.t
-    A_obs = dfr.A_obs
-    rho_at_t = dfr.rho
+    num_alphas = length(orders)
+    p1s = Plots.Plot[]
+    p2s = Plots.Plot[]
+    p3s = Plots.Plot[]
 
-    anim = @animate for i = 1:2:length(t_vals)  # step to speed up animation
-        # Current rho
-        current_rho = rho_at_t[i]
-        d = decay(current_rho)
+    for (j, α) in enumerate(orders)
+        A_obs = A_obs_dict[α]
 
-        # Compute current potential
-        U = - ( V .* (A_range .- sqrt(K) .* atan.(A_range ./ sqrt(K))) .+ A0p .* A_range .- (d / 2) .* A_range.^2 )
-        U = U .- minimum(U) # shift to min 0
-
-        # Bifurcation plot with vertical line and ball
+        # Bifurcation
         p1 = plot(rhos, ones(length(rhos)), label="", alpha=0, xlabel="ρ", ylabel="Equilibria A",
-                  title="Bifurcation Diagram", ylim=(0, 4))
-        scatter!(p1, ρ_stable, A_stable, label=false, markersize=1)
-        scatter!(p1, ρ_unstable, A_unstable, label=false, markersize=1)
-        vline!(p1, [current_rho], label="current ρ", color=:gray, lw=2)
-        # Find nearest equilibrium point for ball
-        idx = argmin(abs.(ρ_stable .- current_rho))
-        scatter!(p1, [ρ_stable[idx]], [A_obs[i]], markersize=7, label="current state", color=:black)
+                  title="Bifurcation (alpha=$(α))", ylim=(0, 4), legend=false)
+        scatter!(p1, ρ_stable, A_stable, label="", markersize=1, color=:green)
+        plot!(p1, ρ_unstable, A_unstable, label="", lw=2, color=:red, linestyle=:dash)
+        vline!(p1, [current_rho], label="", color=:gray, lw=2)
+        scatter!(p1, [current_rho], [A_obs[i]], markersize=7, color=:black, label="")
+        push!(p1s, p1)
 
-        # Potential plot with fill and ball
-        p2 = plot(A_range, U, title="Potential Landscape (ρ=$(round(current_rho, digits=3)))", xlabel="A", ylabel="Potential landscape; U(A)", lw=2, color=:black, legend=false,
+        # Potential
+        U_idx = argmin(abs.(A_range .- A_obs[i]))
+        p2 = plot(A_range, U, title="Potential (rho=$(round(current_rho, digits=3)))", xlabel="A", ylabel="U(A)", lw=2, color=:black, legend=false,
                   ylims=(-0.05, maximum(U)+0.05))
         plot!(p2, A_range, U, fillrange=minimum(U)-0.05, fillalpha=0.3, c=:purple)
-        scatter!(p2, [A_obs[i]], [U[argmin(abs.(A_range .- A_obs[i]))]], markersize=10, color=:black)
+        scatter!(p2, [A_obs[i]], [U[U_idx]], markersize=10, color=:black)
+        push!(p2s, p2)
 
-        # Trajectory plot: A vs time (time increasing downward)
+        # Dynamics
         p3 = plot(A_obs[1:i], t_vals[1:i], title="Dynamics", xlabel="A", ylabel="Time", lw=2, color=:blue, legend=false,
                   yflip=true, xlims=(0, 4), ylims=(0, t_end))
-
-        plot(p1, p2, p3, layout=(3,1), size=(800, 900))
+        push!(p3s, p3)
     end
 
-    # Save as GIF
-    scen_safe = replace(string(scen), r"[^\w]+" => "_")
-    α_safe    = replace(string(round(αval,digits=2)), "." => "-")
-    fn = "plots/bifurcation_dynamics_alpha$(α_safe).gif"
-    gif(anim, fn, fps=15)
-    @info "saved $fn"
+    # Combine
+    plot(p1s..., p2s..., p3s..., layout=(3, num_alphas), size=(800 * num_alphas, 900))
 end
+
+# Save as GIF
+fn = "plots/combined_dynamics.gif"
+gif(anim, fn, fps=15)
+@info "saved $fn"

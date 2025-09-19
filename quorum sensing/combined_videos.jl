@@ -22,7 +22,7 @@ sample_times  = collect(0.0:1.0:t_end)         # a few snapshots up to 15
 h             = 0.01                          # solver step
 nc_corr       = 3
 replicates    = 1
-noise_sigma   = .09                          # white noise std at measurement times
+noise_sigma   = 1                          # white noise std at measurement times
 
 # fractional derivative orders
 orders = [0.8, 1.0]
@@ -39,13 +39,11 @@ function rho_fun(t)
     elseif t < 280
         0.3
     elseif t < 450
-        0.28690578325768207
-    elseif t < 500
         0.3
     elseif t < 550
-        0.35
+        0.3
     else
-        0.4
+        0.35
     end
 end
 
@@ -58,7 +56,8 @@ function QS_RHS(t, y, par)
     ρ = ρ_fun(t)
     det = V .* A.^2 ./ (K .+ A.^2) .+ A0 .- decay(ρ) .* A
     if noise_sigma > 0
-        noise = noise_sigma .* gamma(alpha .+ 1) ./ (h .^ (alpha .- 0.5)) .* randn(rng)
+        # noise = noise_sigma .* gamma(alpha .+ 1) ./ (h .^ (alpha .- 0.5)) .* randn(rng)
+                noise = noise_sigma .* randn(rng)
         return det .+ noise
     else
         return det
@@ -172,57 +171,74 @@ end
 
 A_range = collect(0:0.01:4)
 
-exp_ids = sort(unique(all_rows.exp_id))
+# Extract data for both alphas
+df08 = all_rows[all_rows.alpha .== 0.8, :]
+dfr08 = df08[df08.replicate .== 1, :]
+t_vals08 = dfr08.t
+A_obs08 = dfr08.A_obs
+rho_at_t08 = dfr08.rho
 
-for ex_id in exp_ids
-    df1 = all_rows[all_rows.exp_id .== ex_id, :]
+df10 = all_rows[all_rows.alpha .== 1.0, :]
+dfr10 = df10[df10.replicate .== 1, :]
+t_vals10 = dfr10.t
+A_obs10 = dfr10.A_obs
+rho_at_t10 = dfr10.rho
 
-    scen  = df1.scenario[1]
-    αval  = df1.alpha[1]
-    reps  = sort(unique(df1.replicate))
+# Assume t_vals are the same
+t_vals = t_vals08
 
-    dfr = df1[df1.replicate .== 1, :]  # single replicate
+anim = @animate for i = 1:15:length(t_vals)  # step to speed up animation
+    # Current rho (same for both)
+    current_rho = rho_at_t08[i]
+    d = decay(current_rho)
 
-    t_vals = dfr.t
-    A_obs = dfr.A_obs
-    rho_at_t = dfr.rho
+    # Compute current potential (same for both since independent of alpha)
+    U = - ( V .* (A_range .- sqrt(K) .* atan.(A_range ./ sqrt(K))) .+ A0p .* A_range .- (d / 2) .* A_range.^2 )
+    U = U .- minimum(U) # shift to min 0
 
-    anim = @animate for i = 1:2:length(t_vals)  # step to speed up animation
-        # Current rho
-        current_rho = rho_at_t[i]
-        d = decay(current_rho)
+    # Left: alpha=0.8
+    # Bifurcation left
+    p1_left = plot(rhos, ones(length(rhos)), label="", alpha=0, xlabel="ρ", ylabel="Equilibria A",
+                   title="Bifurcation (alpha=0.8)", ylim=(0, 4), legend=false)
+    scatter!(p1_left, ρ_stable, A_stable, label="", markersize=1, color=:green)
+    plot!(p1_left, ρ_unstable, A_unstable, label="", lw=2, color=:red, linestyle=:dash)
+    vline!(p1_left, [current_rho], label="", color=:gray, lw=2)
+    scatter!(p1_left, [current_rho], [A_obs08[i]], markersize=7, color=:black, label="")
 
-        # Compute current potential
-        U = - ( V .* (A_range .- sqrt(K) .* atan.(A_range ./ sqrt(K))) .+ A0p .* A_range .- (d / 2) .* A_range.^2 )
-        U = U .- minimum(U) # shift to min 0
+    # Potential left
+    p2_left = plot(A_range, U, title="Potential (rho=$(round(current_rho, digits=3)))", xlabel="A", ylabel="U(A)", lw=2, color=:black, legend=false,
+                   ylims=(-0.05, maximum(U)+0.05))
+    plot!(p2_left, A_range, U, fillrange=minimum(U)-0.05, fillalpha=0.3, c=:purple)
+    scatter!(p2_left, [A_obs08[i]], [U[argmin(abs.(A_range .- A_obs08[i]))]], markersize=10, color=:black)
 
-        # Bifurcation plot with vertical line and ball
-        p1 = plot(rhos, ones(length(rhos)), label="", alpha=0, xlabel="ρ", ylabel="Equilibria A",
-                  title="Bifurcation Diagram", ylim=(0, 4))
-        scatter!(p1, ρ_stable, A_stable, label=false, markersize=1)
-        scatter!(p1, ρ_unstable, A_unstable, label=false, markersize=1)
-        vline!(p1, [current_rho], label="current ρ", color=:gray, lw=2)
-        # Find nearest equilibrium point for ball
-        idx = argmin(abs.(ρ_stable .- current_rho))
-        scatter!(p1, [ρ_stable[idx]], [A_obs[i]], markersize=7, label="current state", color=:black)
+    # Dynamics left
+    p3_left = plot(A_obs08[1:i], t_vals[1:i], title="Dynamics", xlabel="A", ylabel="Time", lw=2, color=:blue, legend=false,
+                   yflip=true, xlims=(0, 4), ylims=(0, t_end))
 
-        # Potential plot with fill and ball
-        p2 = plot(A_range, U, title="Potential Landscape (ρ=$(round(current_rho, digits=3)))", xlabel="A", ylabel="Potential landscape; U(A)", lw=2, color=:black, legend=false,
-                  ylims=(-0.05, maximum(U)+0.05))
-        plot!(p2, A_range, U, fillrange=minimum(U)-0.05, fillalpha=0.3, c=:purple)
-        scatter!(p2, [A_obs[i]], [U[argmin(abs.(A_range .- A_obs[i]))]], markersize=10, color=:black)
+    # Right: alpha=1.0
+    # Bifurcation right
+    p1_right = plot(rhos, ones(length(rhos)), label="", alpha=0, xlabel="ρ", ylabel="Equilibria A",
+                    title="Bifurcation (alpha=1.0)", ylim=(0, 4), legend=false)
+    scatter!(p1_right, ρ_stable, A_stable, label="", markersize=1, color=:green)
+    plot!(p1_right, ρ_unstable, A_unstable, label="", lw=2, color=:red, linestyle=:dash)
+    vline!(p1_right, [current_rho], label="", color=:gray, lw=2)
+    scatter!(p1_right, [current_rho], [A_obs10[i]], markersize=7, color=:black, label="")
 
-        # Trajectory plot: A vs time (time increasing downward)
-        p3 = plot(A_obs[1:i], t_vals[1:i], title="Dynamics", xlabel="A", ylabel="Time", lw=2, color=:blue, legend=false,
-                  yflip=true, xlims=(0, 4), ylims=(0, t_end))
+    # Potential right
+    p2_right = plot(A_range, U, title="Potential (rho=$(round(current_rho, digits=3)))", xlabel="A", ylabel="U(A)", lw=2, color=:black, legend=false,
+                    ylims=(-0.05, maximum(U)+0.05))
+    plot!(p2_right, A_range, U, fillrange=minimum(U)-0.05, fillalpha=0.3, c=:purple)
+    scatter!(p2_right, [A_obs10[i]], [U[argmin(abs.(A_range .- A_obs10[i]))]], markersize=10, color=:black)
 
-        plot(p1, p2, p3, layout=(3,1), size=(800, 900))
-    end
+    # Dynamics right
+    p3_right = plot(A_obs10[1:i], t_vals[1:i], title="Dynamics", xlabel="A", ylabel="Time", lw=2, color=:blue, legend=false,
+                    yflip=true, xlims=(0, 4), ylims=(0, t_end))
 
-    # Save as GIF
-    scen_safe = replace(string(scen), r"[^\w]+" => "_")
-    α_safe    = replace(string(round(αval,digits=2)), "." => "-")
-    fn = "plots/bifurcation_dynamics_alpha$(α_safe).gif"
-    gif(anim, fn, fps=15)
-    @info "saved $fn"
+    # Combine: left and right columns
+    plot(p1_left, p1_right, p2_left, p2_right, p3_left, p3_right, layout=(3,2), size=(1600, 900))
 end
+
+# Save as GIF
+fn = "plots/combined_dynamics.gif"
+gif(anim, fn, fps=15)
+@info "saved $fn"
