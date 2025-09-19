@@ -16,13 +16,13 @@ A0p = 0.05
 decay(ρ) = 0.1 + (1 - ρ) / (ρ * (2 - ρ))      # singular at ρ -> 0
 
 # time grid and measurement settings
-t_end         = 500.0
+t_end         = 1000.0
 tSpan         = (0.0, t_end)
 sample_times  = collect(0.0:1.0:t_end)         # a few snapshots up to 15
 h             = 0.01                          # solver step
 nc_corr       = 3
 replicates    = 1
-noise_sigma   = 1                          # white noise std at measurement times
+noise_sigma   = 1.2                          # white noise std at measurement times
 
 # fractional derivative orders
 orders = [0.75, 1.0]
@@ -31,15 +31,24 @@ orders = [0.75, 1.0]
 const scenario = (label="S", rho_base=0.35, Ainit=1.5, pert=nothing)
 
 # rho schedule (stepwise changing)
-function rho_fun(t)
-    if t < 100
-        0.32
-    elseif t < 278
-        0.29
-    else
-        0.32
-    end
+# const T = [0.0, 10, 30, 50, 70, 80, 100, 120, 150, 170, 180, 200, 220, 250]
+# const R = [0.35, 0.34, 0.33, 0.32, 0.31, 0.30, 0.29, 0.289, 0.30, 0.31, 0.315, 0.316, 0.32, 0.33]
+# rho_fun(t::Real) = R[clamp(searchsortedlast(T, float(t)), 1, length(R))]
+# @inline smoothstep(s) = s^2 * (3 - 2s)   # C1 smooth on [0,1]
+@inline smoothstep(s) = s^3 * (10 + s*(-15 + 6s)) # 6s^5 - 15s^4 + 10s^3
+
+function ramp(t, t0, t1, y0, y1)
+    t ≤ t0 && return y0
+    t ≥ t1 && return y1
+    s = (t - t0) / (t1 - t0)
+    y0 + (y1 - y0) * smoothstep(s)
 end
+
+# example: one smooth down, then one smooth up
+T_c=250.0
+rho_fun(t) = t < T_c ? ramp(t, 0.0, T_c, 0.38, 0.29) :
+                     ramp(t, T_c, t_end, 0.29, 0.38)
+
 
 make_rho_fun(rho_base; pert=nothing) = rho_fun
 
@@ -229,3 +238,65 @@ end
 fn = "plots/scenario3.mp4"
 gif(anim, fn, fps=15)
 @info "saved $fn"
+
+
+# Hysteresis from data only (A vs ρ), split into collapse (dρ/dt<0) and recovery (dρ/dt>0)
+palette = [:blue, :orange, :purple, :green]  # extend if more alphas
+p = plot(xlabel="ρ", ylabel="State A", title="Hysteresis loops from data", legend=:bottomright)
+
+for (j, α) in enumerate(orders)
+    ρ = rho_at_t_dict[α]
+    A = A_obs_dict[α]
+
+    # direction of the schedule at each step
+    dρ = vcat(diff(ρ), 0.0)
+    collapse = dρ .< 0     # going down in ρ
+    recovery = dρ .> 0     # going up in ρ
+
+    c = palette[j]
+    # scatter only (data-driven); small markers + slight transparency helps dense paths
+    scatter!(p, ρ[collapse],  A[collapse],  m=:circle,   ms=3, alpha=0.8, color=c, label="α=$(α) collapse")
+    scatter!(p, ρ[recovery],  A[recovery],  m=:utriangle, ms=3, alpha=0.8, color=c, label="α=$(α) recovery")
+
+    # optional: faint time-ordered polyline to make the loop obvious (still just data)
+    plot!(p, ρ, A, lw=0.8, alpha=0.3, color=c, label="")
+end
+
+savefig(p, "plots/hysteresis_data_only1.png")
+
+
+## plot the hysteresis loop
+# choose a small window for the background equilibria 
+cols = [:blue, :red]  # one color per alpha
+
+# collect data ρ-range to set axis limits around the data (not the truth window)
+ρ_data = vcat([rho_at_t_dict[α] for α in orders]...)
+A_data = vcat([A_obs_dict[α] for α in orders]...)
+xmin = minimum(ρ_data); xmax = maximum(ρ_data)
+pad = 0.2 * max(eps(), xmax - xmin)
+Ymax = maximum(A_data)
+
+p = plot(xlabel="ρ", ylabel="State A", title="Hysteresis loops", legend=:topleft,
+        xlims=(xmin - pad, xmax + pad), ylims=(0, Ymax + 0.1*Ymax))
+
+# background equilibria (optional)
+scatter!(p, ρ_stable, A_stable, ms=2, alpha=0.5, color=:gray40, label="stable eq")
+plot!(p, ρ_unstable, A_unstable, lw=1.5, ls=:dash, alpha=0.6, color=:gray50, label="unstable eq")
+
+for (j, α) in enumerate(orders)
+    ρ = rho_at_t_dict[α]
+    A = A_obs_dict[α]
+    dir = vcat(0.0, diff(ρ))        # sign of dρ/dt
+    collapse = dir .< 0              # decreasing ρ branch
+    recovery = dir .> 0              # increasing ρ branch
+    c = cols[j]
+
+    # points
+    scatter!(p, ρ[collapse], A[collapse], m=:circle,   ms=3, alpha=0.85, color=c, label="α=$(α) collapse")
+    scatter!(p, ρ[recovery], A[recovery], m=:utriangle, ms=3, alpha=0.85, color=c, label="α=$(α) recovery")
+
+    # faint time-ordered path to show the loop
+    plot!(p, ρ, A, lw=0.8, alpha=0.4, color=c, label="")
+end
+
+savefig(p, "plots/hysteresis_scatter.png")
