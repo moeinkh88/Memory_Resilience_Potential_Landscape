@@ -1,4 +1,5 @@
 using FdeSolver, Random, Statistics, Plots
+using Printf
 
 # Fix the random seed for reproducibility
 Random.seed!(123)
@@ -267,14 +268,109 @@ p2 = plot_basin_switches(t_switch, X_mem_switch;
 plot(p1, p2, layout=(2,1), size=(950,650))
 
 # ---------- parameters for robust detection ----------
+# x_core   = 0.7          # core threshold (inside the valley)
+# τ_hold   = 0.20         # minimum hold time to count entry (time units)
+# hstep(t) = t[2]-t[1]    # helper
+
+# # Label: +1 in right core, -1 in left core, 0 otherwise
+# label_core(x; xc=x_core) = x ≥ xc ?  1 : (x ≤ -xc ? -1 : 0)
+
+# # Find committed entries into basin cores with a hold-time requirement
+# function core_entries(t, x; xc=x_core, τhold=τ_hold)
+#     n = length(x)
+#     Δ = hstep(t)
+#     hold = max(1, round(Int, τhold/Δ))
+#     lab = [label_core(x[i]; xc=xc) for i in 1:n]
+
+#     idx, lab_keep = Int[], Int[]
+#     i = 1
+#     while i ≤ n-hold+1
+#         ℓ = lab[i]
+#         if ℓ == 0
+#             i += 1
+#             continue
+#         end
+#         # must remain in the same core for 'hold' steps
+#         ok = all(lab[j] == ℓ for j in i:i+hold-1)
+#         if ok
+#             push!(idx, i); push!(lab_keep, ℓ)
+#             # skip forward until we leave this core (prevents dense duplicates)
+#             k = i + hold
+#             while k ≤ n && lab[k] == ℓ
+#                 k += 1
+#             end
+#             i = k
+#         else
+#             i += 1
+#         end
+#     end
+#     return idx, lab_keep
+# end
+
+# # Dwell times between committed entries into opposite cores
+# function dwell_times_committed(t, x; xc=x_core, τhold=τ_hold)
+#     idx, labs = core_entries(t, x; xc=xc, τhold=τhold)
+#     dwell = Float64[]
+#     for k in 2:length(idx)
+#         if labs[k] != labs[k-1]                 # only opposite-core entries
+#             push!(dwell, t[idx[k]] - t[idx[k-1]])
+#         end
+#     end
+#     return dwell, idx, labs
+# end
+
+# # Compute committed-switch dwell times for both cases
+# dwell_nomem_c, idx_nomem, labs_nomem = dwell_times_committed(t_switch, X_nomem_switch)
+# dwell_mem_c,   idx_mem,   labs_mem   = dwell_times_committed(t_switch, X_mem_switch)
+
+# println("Committed switches (no mem)   = ", length(dwell_nomem_c))
+# println("Committed switches (with mem) = ", length(dwell_mem_c))
+# println("Mean committed dwell (no mem) = ", mean(dwell_nomem_c))
+# println("Mean committed dwell (mem)    = ", mean(dwell_mem_c))
+
+# # -------- plots --------
+
+# # 1) Two-panel time series with cores and committed switch markers
+# function plot_switch_panels(t, x; title_str="", xc=x_core, τhold=τ_hold)
+#     p = plot(xlabel="time", ylabel="x(t)", title=title_str, legend=:topright)
+#     plot!(p, t, x, lw=0.8, color=:gray70, label=false)
+#     hline!(p, [0.0], ls=:dash, c=:black, label="unstable x=0")
+#     hline!(p, [ xc], ls=:dot,  c=:blue,  label="core +x")
+#     hline!(p, [-xc], ls=:dot,  c=:red,   label="core -x")
+#     idx, labs = core_entries(t, x; xc=xc, τhold=τhold)
+#     if !isempty(idx)
+#         scatter!(p, t[idx], x[idx], m=:diamond, ms=1, c=:purple, label="committed entry")
+#     end
+#     p
+# end
+
+# p1 = plot_switch_panels(t_switch, X_nomem_switch; title_str="No memory (α=1.0)")
+# p2 = plot_switch_panels(t_switch, X_mem_switch;   title_str="With memory (α=$α_mem)")
+# plot(p1, p2, layout=(2,1), size=(950,650))
+
+
+# ---------- parameters ----------
 x_core   = 0.7          # core threshold (inside the valley)
-τ_hold   = 0.20         # minimum hold time to count entry (time units)
+τ_hold   = 0.50         # minimum hold time to count entry (time units)
 hstep(t) = t[2]-t[1]    # helper
 
 # Label: +1 in right core, -1 in left core, 0 otherwise
 label_core(x; xc=x_core) = x ≥ xc ?  1 : (x ≤ -xc ? -1 : 0)
 
-# Find committed entries into basin cores with a hold-time requirement
+# EARLY ANCHOR: first committed entry (optional helper)
+function first_committed_entry(t, x; xc=x_core, τhold=τ_hold)
+    Δ = t[2]-t[1]; hold = max(1, round(Int, τhold/Δ))
+    lab = [label_core(x[i]; xc=xc) for i in eachindex(x)]
+    for i in 1:length(x)-hold+1
+        ℓ = lab[i]
+        if ℓ != 0 && all(lab[j]==ℓ for j in i:i+hold-1)
+            return i, ℓ    # index and which core (+1 or -1)
+        end
+    end
+    return nothing, 0
+end
+
+# Committed entries into basin cores (hold-time required)
 function core_entries(t, x; xc=x_core, τhold=τ_hold)
     n = length(x)
     Δ = hstep(t)
@@ -283,17 +379,15 @@ function core_entries(t, x; xc=x_core, τhold=τ_hold)
 
     idx, lab_keep = Int[], Int[]
     i = 1
-    while i ≤ n-hold+1
+    while i ≤ n - hold + 1
         ℓ = lab[i]
         if ℓ == 0
             i += 1
             continue
         end
-        # must remain in the same core for 'hold' steps
         ok = all(lab[j] == ℓ for j in i:i+hold-1)
         if ok
             push!(idx, i); push!(lab_keep, ℓ)
-            # skip forward until we leave this core (prevents dense duplicates)
             k = i + hold
             while k ≤ n && lab[k] == ℓ
                 k += 1
@@ -306,46 +400,106 @@ function core_entries(t, x; xc=x_core, τhold=τ_hold)
     return idx, lab_keep
 end
 
-# Dwell times between committed entries into opposite cores
-function dwell_times_committed(t, x; xc=x_core, τhold=τ_hold)
-    idx, labs = core_entries(t, x; xc=xc, τhold=τhold)
-    dwell = Float64[]
-    for k in 2:length(idx)
-        if labs[k] != labs[k-1]                 # only opposite-core entries
-            push!(dwell, t[idx[k]] - t[idx[k-1]])
+# Dwell times between committed entries into opposite cores,
+# with optional anchoring at the very first committed entry.
+function committed_durations_censored(t, x; xc=x_core, τhold=τ_hold, anchor_at_first::Bool=true)
+    if anchor_at_first
+        i0, _ = first_committed_entry(t, x; xc=xc, τhold=τhold)
+        if i0 !== nothing
+            t = t[i0:end]; x = x[i0:end]   # clip series to start at first committed entry
         end
     end
-    return dwell, idx, labs
+
+    idx_all, labs_all = core_entries(t, x; xc=xc, τhold=τhold)
+    times, cens = Float64[], Int[]   # 0 = observed, 1 = right-censored
+
+    # completed dwells only (opposite-core entries)
+    for k in 2:length(idx_all)
+        if labs_all[k] != labs_all[k-1]
+            push!(times, t[idx_all[k]] - t[idx_all[k-1]])
+            push!(cens, 0)
+        end
+    end
+    # add the final ongoing dwell as right-censored
+    if !isempty(idx_all)
+        push!(times, t[end] - t[idx_all[end]])
+        push!(cens, 1)
+    end
+    return times, cens
 end
 
-# Compute committed-switch dwell times for both cases
-dwell_nomem_c, idx_nomem, labs_nomem = dwell_times_committed(t_switch, X_nomem_switch)
-dwell_mem_c,   idx_mem,   labs_mem   = dwell_times_committed(t_switch, X_mem_switch)
 
-println("Committed switches (no mem)   = ", length(dwell_nomem_c))
-println("Committed switches (with mem) = ", length(dwell_mem_c))
-println("Mean committed dwell (no mem) = ", mean(dwell_nomem_c))
-println("Mean committed dwell (mem)    = ", mean(dwell_mem_c))
+# Convenience: get only the switch indices for plotting
+committed_switch_indices(t, x; xc=x_core, τhold=τ_hold) =
+    last(dwell_times_committed(t, x; xc=xc, τhold=τhold))
 
-# -------- plots --------
 
-# 1) Two-panel time series with cores and committed switch markers
-function plot_switch_panels(t, x; title_str="", xc=x_core, τhold=τ_hold)
+    # List all committed core-entry times and labels
+idx_all, labs_all = core_entries(t_switch, X_nomem_switch; xc=x_core, τhold=τ_hold)
+E = t_switch[idx_all]
+println("Committed entries (no-mem):")
+for k in 1:length(E)
+    println(@sprintf("  k=%2d  t=%.3f  label=%+d", k, E[k], labs_all[k]))
+end
+
+println("\nCommitted dwells (no-mem):")
+for k in 2:length(E)
+    if labs_all[k] != labs_all[k-1]
+        Δt = E[k] - E[k-1]
+        println(@sprintf("  %2d: %.3f time units  (~%d steps)", k-1, Δt, round(Int, Δt/0.01)))
+    end
+end
+
+function print_dwells(t, x; xc=x_core, τhold=τ_hold, h=0.01)
+    idx_all, labs_all = core_entries(t, x; xc=xc, τhold=τhold)
+    E = t[idx_all]
+    println("Committed dwells:")
+    for k in 2:length(E)
+        if labs_all[k] != labs_all[k-1]
+            Δt = E[k] - E[k-1]
+            println(@sprintf("  %.3f time units  (~%d steps)", Δt, round(Int, Δt/h)))
+        end
+    end
+end
+
+# Example:
+print_dwells(t_switch, X_nomem_switch; h=0.01)
+print_dwells(t_switch, X_mem_switch;   h=0.01)
+
+
+# -------------- plotting (only true committed switches) --------------
+
+function plot_switch_panels(t, x; title_str="", xc=x_core, τhold=τ_hold,
+                            show_vlines=true, ms=5)
     p = plot(xlabel="time", ylabel="x(t)", title=title_str, legend=:topright)
     plot!(p, t, x, lw=0.8, color=:gray70, label=false)
     hline!(p, [0.0], ls=:dash, c=:black, label="unstable x=0")
     hline!(p, [ xc], ls=:dot,  c=:blue,  label="core +x")
     hline!(p, [-xc], ls=:dot,  c=:red,   label="core -x")
-    idx, labs = core_entries(t, x; xc=xc, τhold=τhold)
-    if !isempty(idx)
-        scatter!(p, t[idx], x[idx], m=:diamond, ms=1, c=:purple, label="committed entry")
+
+    sw_idx = committed_switch_indices(t, x; xc=xc, τhold=τhold)
+    if !isempty(sw_idx)
+        if show_vlines
+            vline!(p, t[sw_idx], c=:gray, ls=:dash, alpha=0.35, label=false)
+        end
+        scatter!(p, t[sw_idx], x[sw_idx], m=:diamond, ms=ms, c=:purple,
+                 label="committed switch")
     end
-    p
+    return p
 end
 
+# -------- usage ----------
+dwell_nomem_c, swidx_nomem = dwell_times_committed(t_switch, X_nomem_switch)
+dwell_mem_c,   swidx_mem   = dwell_times_committed(t_switch, X_mem_switch)
+
+println("Committed switches (no mem)   = ", length(swidx_nomem))
+println("Committed switches (with mem) = ", length(swidx_mem))
+println("Mean committed dwell (no mem) = ", mean(dwell_nomem_c))
+println("Mean committed dwell (mem)    = ", mean(dwell_mem_c))
+
 p1 = plot_switch_panels(t_switch, X_nomem_switch; title_str="No memory (α=1.0)")
-p2 = plot_switch_panels(t_switch, X_mem_switch;   title_str="With memory (α=$α_mem)")
-plot(p1, p2, layout=(2,1), size=(950,650))
+p2 = plot_switch_panels(t_switch, X_mem_switch;   title_str="With memory (α=$(α_mem))")
+plot(p1, p2, layout=(2,1), size=(950,650), legendposition=:topleft)
 
 # 2) Dwell-time histograms with logarithmic bins
 function logbins(x; nb=15)
@@ -358,6 +512,90 @@ bins_mem   = logbins(dwell_mem_c)
 histogram(dwell_nomem_c, bins=bins_nomem, normalize=:pdf, label="No memory (committed)", alpha=0.6)
 histogram!(dwell_mem_c,   bins=bins_mem,   normalize=:pdf, label="With memory (committed)", alpha=0.6)
 xlabel!("Dwell time"); ylabel!("PDF"); title!("Committed dwell-time distributions")
+
+##lets correct dwell time
+# Durations + censoring from committed entries
+# returns: times (durations), cens (0=event observed, 1=right-censored)
+function committed_durations_censored(t, x; xc=x_core, τhold=τ_hold)
+    idx_all, labs_all = core_entries(t, x; xc=xc, τhold=τhold)
+    times, cens = Float64[], Int[]
+    for k in 2:length(idx_all)
+        if labs_all[k] != labs_all[k-1]
+            push!(times, t[idx_all[k]] - t[idx_all[k-1]]); push!(cens, 0)
+        end
+    end
+    if !isempty(idx_all)
+        # add the final ongoing dwell as right-censored
+        push!(times, t[end] - t[idx_all[end]]); push!(cens, 1)
+    end
+    return times, cens
+end
+
+# Kaplan–Meier estimator of survival S(t)
+function kaplan_meier(times::Vector{<:Real}, cens::Vector{<:Integer})
+    p = sortperm(times); t = collect(times[p]); c = collect(cens[p])
+    n = length(t); at_risk = n
+    T, S = Float64[], Float64[]
+    s_prev = 1.0; i = 1
+    while i ≤ n
+        ti = t[i]; d = 0; cc = 0
+        while i ≤ n && t[i] == ti
+            (c[i] == 0) ? (d += 1) : (cc += 1); i += 1
+        end
+        if d > 0
+            s_prev *= (at_risk - d)/at_risk
+            push!(T, ti); push!(S, s_prev)
+        end
+        at_risk -= (d + cc)
+    end
+    return T, S
+end
+
+# Restricted mean (area under survival to W)
+function restricted_mean(T::Vector{<:Real}, S::Vector{<:Real}, W::Real)
+    # piecewise-constant survival between event times
+    tgrid = [0.0; T; W]
+    sgrid = [1.0; S; (isempty(S) ? 1.0 : S[end])]
+    rmst = 0.0
+    for j in 1:length(tgrid)-1
+        Δ = tgrid[j+1] - tgrid[j]
+        rmst += sgrid[j]*Δ
+    end
+    rmst
+end
+
+times_no, cens_no = committed_durations_censored(t_switch, X_nomem_switch)
+times_me, cens_me = committed_durations_censored(t_switch, X_mem_switch)
+
+Tno, Sno = kaplan_meier(times_no, cens_no)
+Tme, Sme = kaplan_meier(times_me, cens_me)
+
+println("KM median (no mem): ", Tno[findfirst(<(0.5), Sno)] )
+println("KM median (mem):    ", Tme[findfirst(<(0.5), Sme)] )
+
+println("no-mem dwell (steps): ",
+        round.(Int, dwell_nomem_c ./ h))
+println("mem dwell (steps): ",
+        round.(Int, dwell_mem_c   ./ h))
+println("no-mem min/med/max (time): ",
+        minimum(dwell_nomem_c), " / ",
+        median(dwell_nomem_c), " / ",
+        maximum(dwell_nomem_c))
+
+
+println("Restricted mean to W=200 (no mem): ", restricted_mean(Tno, Sno, 200.0))
+println("Restricted mean to W=200 (mem):    ", restricted_mean(Tme, Sme, 200.0))
+
+rate_no = length(times_no[cens_no .== 0]) / (t_switch[end] - t_switch[1])
+rate_me = length(times_me[cens_me .== 0]) / (t_switch[end] - t_switch[1])
+println("Committed switch rate  no mem = ", rate_no)
+println("Committed switch rate  mem    = ", rate_me)
+
+# Occupancy fraction based on instantaneous core label (no hold)
+lab = x -> label_core(x; xc=x_core)
+frac_in_core(x) = mean([lab(xi)!=0 for xi in x])
+println("Occupancy in cores no mem = ", frac_in_core(X_nomem_switch))
+println("Occupancy in cores mem    = ", frac_in_core(X_mem_switch))
 
 # 3) Survival curves (1 - ECDF) on log–log axes to show tails
 function survival_curve(x; npts=20)
@@ -379,24 +617,7 @@ tk2, S2 = survival_curve(dwell_mem_c)
 # plot!(tk2, S2, xscale=:log10, yscale=:log10, lw=2, label="With memory")
 plot(tk1, S1, lw=2, label="No memory")
 plot!(tk2, S2, lw=2, label="With memory")
-xlabel!("t"); ylabel!("Survival 1-ECDF"); title!("Committed dwell-time survival (log–log)")
-####
-
-# Define the system with multiplicative noise: dx/dt = x - x^3 + noise_amp(x)*xi(t)
-function F_multiplicative(t, x)
-    return (x .- x.^3) .+ noise_amp.(x) .* noise_func_mult.(t)
-end
-
-# Simulate for memory and no-memory cases with multiplicative noise
-t_mult, X_nomem_mult = FDEsolver(F_multiplicative, tSpan, y0, α_nomem; h = h)
-_,      X_mem_mult   = FDEsolver(F_multiplicative, tSpan, y0, α_mem;   h = h)
-
-# Compute overall variance for each case
-var_nomem_mult = var(X_nomem_mult[steady_index:end])
-var_mem_mult   = var(X_mem_mult[steady_index:end])
-println("Variance under multiplicative noise (no memory)   = ", var_nomem_mult)
-println("Variance under multiplicative noise (with memory) = ", var_mem_mult)
-
+xlabel!("t"); ylabel!("Survival 1-ECDF"); title!("Committed dwell-time survival")
 
 
 
@@ -506,3 +727,5 @@ end
 plot(m_list, var_no, lw=2, label="no memory")
 plot!(m_list, var_me, lw=2, label="with memory")
 xlabel!("block size m"); ylabel!("variance"); title!("Variance after coarse graining")
+
+
