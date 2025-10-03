@@ -96,8 +96,8 @@ println("τ_int over ", W_time, "  with memory = ", tau_int(acf_m, h, W_time))
 t0_plot, t1_plot = 400.0, 450.0
 i_start = clamp(Int(floor((t0_plot - t_vals[1])/h))+1, 1, length(t_vals))
 i_end   = clamp(Int(floor((t1_plot - t_vals[1])/h))+1, 1, length(t_vals))
-p1 = plot(t_vals[i_start:i_end], X_mem[i_start:i_end], label="with memory α=$(α_mem)")
-plot!(p1, t_vals[i_start:i_end], X_nomem[i_start:i_end], label="no memory α=1")
+p1 = plot(t_vals[i_start:i_end], X_mem[i_start:i_end], label="with memory α=$(α_mem)",  color=:indianred3)
+plot!(p1, t_vals[i_start:i_end], X_nomem[i_start:i_end], label="no memory α=1",   color=:dodgerblue1)
 xlabel!(p1, "time"); ylabel!(p1, "x(t)"); title!(p1, "trajectory segment")
 
 # 2) ACF log log

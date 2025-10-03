@@ -117,8 +117,8 @@ dwell_mem_time   = h .* dwell_mem_steps
 
 println("-- committed switching summary --")
 println("hold_steps = $hold_steps  (≈ $(hold_steps*h) time units),  x_core = $x_core")
-println("switches (no mem)   = ", length(swidx_nomem), "   mean dwell (time) = ", mean(dwell_nomem_time))
-println("switches (with mem) = ", length(swidx_mem),   "   mean dwell (time) = ", mean(dwell_mem_time))
+println("switches (no mem)   = ", length(swidx_nomem), "   mean dwell (time) = ", mean(dwell_nomem_steps))
+println("switches (with mem) = ", length(swidx_mem),   "   mean dwell (time) = ", mean(dwell_mem_steps))
 
 # ---------- 4) Plots ----------
 # (a) time series with cores and committed switches
@@ -163,35 +163,26 @@ title!(p_surv, "Committed dwell survival (time)")
 display(p_surv)
 
 # (d) histogram background + KDE (steps, truncated at x >= 0)
-edges_steps = logbins_steps_two(dwell_nomem_steps, dwell_mem_steps; nb=12)
+lo = min(minimum(dwell_nomem_steps), minimum(dwell_mem_steps))
+hi = max(maximum(dwell_nomem_steps), maximum(dwell_mem_steps))
+edges = collect(floor(Int, lo):100:ceil(Int, hi))   # equal-width 100-step bins
 
-p_kde = histogram(dwell_nomem_steps; bins=edges_steps, normalize=:pdf,
-                  fillalpha=0.35, linealpha=0.5, label="No memory (hist)")
-histogram!(p_kde, dwell_mem_steps; bins=edges_steps, normalize=:pdf,
+histogram(dwell_nomem_steps; bins=edges, normalize=:pdf,
+          fillalpha=0.35, linealpha=0.5, label="No memory (hist)")
+histogram!(dwell_mem_steps;   bins=edges, normalize=:pdf,
            fillalpha=0.35, linealpha=0.5, label="With memory (hist)")
 
-# KDE and truncation to nonnegative support
-kd_no = kde(dwell_nomem_steps)
-kd_me = kde(dwell_mem_steps)
+kd_no = kde(Float64.(dwell_nomem_steps))
+kd_me = kde(Float64.(dwell_mem_steps))
 
 mask_no = kd_no.x .>= 0
 mask_me = kd_me.x .>= 0
 
-plot!(p_kde, kd_no.x[mask_no], kd_no.density[mask_no]; lw=3, label="No memory (KDE)", color=:royalblue)
-plot!(p_kde, kd_me.x[mask_me], kd_me.density[mask_me]; lw=3, label="With memory (KDE)", color=:crimson)
+plot!(kd_no.x[mask_no], kd_no.density[mask_no]; lw=3, label="No memory (KDE)", color=:royalblue)
+plot!(kd_me.x[mask_me], kd_me.density[mask_me]; lw=3, label="With memory (KDE)", color=:crimson)
 
-# median markers
-vline!([median(dwell_nomem_steps)]; ls=:dash, lc=:blue,  label="median no memory")
-vline!([median(dwell_mem_steps)];   ls=:dash, lc=:red,   label="median memory")
+xlabel!("Dwell length (steps)"); ylabel!("PDF")
+title!("Committed dwell-time distributions")
 
-# enforce nonnegative x axis
-xmax_steps = maximum(vcat(dwell_nomem_steps, dwell_mem_steps))
-xlims!(p_kde, (0, xmax_steps))
-
-xlabel!(p_kde, "Dwell length (steps)"); ylabel!(p_kde, "PDF")
-title!(p_kde, "Committed dwell-time distributions (steps)")
-display(p_kde)
-
-
-
-
+vline!([median(dwell_nomem_steps)], ls=:dash, lc=:blue,   label="median no-mem")
+vline!([median(dwell_mem_steps)],   ls=:dash, lc=:red, label="median mem")

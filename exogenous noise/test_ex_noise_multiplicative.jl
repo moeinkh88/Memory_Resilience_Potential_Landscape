@@ -81,8 +81,8 @@ acf_mem   = autocorr_vec(X_mem_steady,   maxlag_steps)
 
 # log–log ACF plot
 lags_time = (0:maxlag_steps) .* h
-plot(lags_time[2:end], acf_nomem[2:end], xscale=:log10, yscale=:log10, label="no memory")
-plot!(lags_time[2:end], acf_mem[2:end],   xscale=:log10, yscale=:log10, label="with memory")
+plot(lags_time[2:end], acf_nomem[2:end], xscale=:log10,  label="no memory")
+plot!(lags_time[2:end], acf_mem[2:end],   xscale=:log10,label="with memory")
 xlabel!("lag (time)"); ylabel!("ACF"); title!("ACF (log–log) under multiplicative noise")
 
 # Short segment plot
@@ -90,8 +90,8 @@ t_plot_start = 200.0
 t_plot_end   = 250.0
 i_start = Int(floor(t_plot_start/h))
 i_end   = Int(floor(t_plot_end/h))
-plot(t_vals[i_start:i_end], X_mem[i_start:i_end],   label="With Memory (α=$(α_mem))",  color=:red)
-plot!(t_vals[i_start:i_end], X_nomem[i_start:i_end], label="No Memory (α=1)",          color=:blue)
+plot(t_vals[i_start:i_end], X_mem[i_start:i_end],   label="With Memory (α=$(α_mem))",  color=:indianred3)
+plot!(t_vals[i_start:i_end], X_nomem[i_start:i_end], label="No Memory (α=1)",          color=:dodgerblue1)
 xlabel!("Time"); ylabel!("x(t)"); title!("Trajectories (multiplicative noise)")
 
 # Integrated autocorrelation time over a finite window W_time
