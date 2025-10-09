@@ -140,31 +140,81 @@ xlabel!(p4, "block size m"); ylabel!(p4, "variance"); title!(p4, "variance after
 display(plot(p1, p2, p3, p4, layout=(2,2)))
 
 
-##optional
-# τ_int as a function of the integration window W (in time units)
-Wmax = 1000.0               # try 400 or 800 to see the flip clearly
-L = Int(round(Wmax / h))   # max lag in steps
+#optional
 
-acf_n = autocorr_biased(Xn, L)
-acf_m = autocorr_biased(Xm, L)
+using FFTW   # add this at the top with your other uses
 
-# cumulative trapezoid equivalent via cumulative sum of ACF (discrete form you used)
-Ws  = (1:L) .* h
-τnW = h .* (1 .+ 2 .* cumsum(acf_n[2:end]))   # length L
-τmW = h .* (1 .+ 2 .* cumsum(acf_m[2:end]))
+# -------- 3) Power spectral density on log log axes with reference slopes --------
 
-pτ = plot(Ws, τnW, lw=2, label="no memory")
-plot!(pτ, Ws, τmW, lw=2, label="with memory")
-xlabel!(pτ, "window W (time units)"); ylabel!(pτ, "τ_int(W)")
-title!(pτ, "Integrated autocorrelation vs window")
-display(pτ)
+"""
+Welch PSD with Hann window.
+Returns single sided frequency f (Hz) and PSD Pxx (power per Hz).
+"""
+function welch_psd(x::AbstractVector{<:Real}, h; seglen::Int=16384, overlap=0.5)
+    fs = 1/h
+    N  = length(x)
+    seglen = seglen > N ? max(256, 2^(floor(Int, log2(N)))) : seglen
+    step   = max(1, Int(round(seglen * (1 - overlap))))
+
+    # Hann window and its power normalization
+    w = 0.5 .* (1 .- cos.(2π .* (0:seglen-1) ./ (seglen-1)))
+    U = sum(w.^2) / seglen
+
+    acc = nothing
+    count = 0
+    for s in 1:step:(N - seglen + 1)
+        seg = @view x[s:s+seglen-1]
+        y   = (seg .- mean(seg)) .* w
+        Y   = rfft(y)
+        # single sided PSD, scaled to power per Hz
+        Pseg = (abs.(Y).^2) ./ (fs * seglen * U)
+        acc = acc === nothing ? Pseg : acc .+ Pseg
+        count += 1
+    end
+    P = acc ./ count
+    f = range(0, fs/2, length=length(P))
+    return f, P
+end
+
+# --- 3) PSD with better visibility ------------------------------------------
+# go longer segments => finer frequency grid (min f = fs/seglen)
+SEG = min(65536, 2^(floor(Int, log2(length(Xn)))))   # ~0.0015 Hz with h=0.01
+f_n, Pn = welch_psd(Xn, h; seglen=16384, overlap=0.5) 
+f_m, Pm = welch_psd(Xm, h; seglen=16384, overlap=0.5)
+
+# skip DC for log axes
+i1 = 2:length(f_n)
+
+# draw references from low f, in muted greys, then plot PSDs on top
+function add_ref_slope!(plt, f, P; slope::Float64, label::String,
+                        f_anchor::Union{Nothing,Real}=nothing, ls=:dash, kwargs...)
+    # choose anchor point (by freq), default = 60% index
+    j = isnothing(f_anchor) ? round(Int, 0.60*length(f)) : argmin(abs.(f .- f_anchor))
+    f0, C = f[j], P[j]
+    yref = C .* (f ./ f0) .^ (-slope)
+    plot!(plt, f, yref; ls=ls, lw=2, label=label, kwargs...)
+end
+
+# build plot, skip DC at f = 0 for log axes 
+i1 = 2:length(f_n) 
+p3 = plot(f_n[i1], Pn[i1]; xscale=:log10, yscale=:log10, lw=2, label="no memory α=1") 
+plot!(p3, f_m[i1], Pm[i1]; lw=2, label="with memory α=$(α_mem)", legendposition=:bottomleft) 
+xlabel!(p3, "frequency") 
+ylabel!(p3, "Power spectral density") 
+# title!(p3, "power spectral density") 
+
+# reference slopes: −2 for α=1 and −2α for memory 
+
+# slope guides first (so they don’t hide PSD), anchored around 2 Hz
+add_ref_slope!(p3, f_n[i1], Pn[i1]; slope=2.0,     label="slope −2 ref",
+               f_anchor=2.0, color=:blue)
+add_ref_slope!(p3, f_m[i1], Pm[i1]; slope=2*α_mem, label="slope −2α ref",
+               f_anchor=2.0, ls=:dashdot, color=:red)
 
 
-##
-using Polynomials.PolyCompat
-# pick a tail region (e.g., lags corresponding to 20–200 time units)
-i1 = Int(round(20/h)); i2 = Int(round(200/h))
-lags = (i1:i2) .* h
-acf_tail = abs.(acf_m[i1+1:i2+1])            # avoid log of negative due to noise
-coef = polyfit(log10.(lags), log10.(acf_tail), 1)
-println("memory tail slope ≈ ", coef.coeffs[1], "  (ACF ~ t^{slope})")
+xlabel!(p3, "frequency")
+ylabel!(p3, "Power spectral density")
+# optional: tighten ranges so Nyquist bend doesn’t dominate
+# ylims!(p3, 1e-10, 1e-4)
+
+display(p3)
