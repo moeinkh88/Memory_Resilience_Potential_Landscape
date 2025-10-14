@@ -267,7 +267,7 @@ savefig(p, "plots/hysteresis_data_only1.png")
 
 ## plot the hysteresis loop
 # choose a small window for the background equilibria 
-cols = [:blue, :red]  # one color per alpha
+cols = [:red, :blue]  # one color per alpha
 
 # collect data ρ-range to set axis limits around the data (not the truth window)
 ρ_data = vcat([rho_at_t_dict[α] for α in orders]...)
