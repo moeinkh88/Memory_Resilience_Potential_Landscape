@@ -1,4 +1,4 @@
-using FdeSolver, Random, Statistics, Plots
+using FdeSolver, Random, Statistics, Plots, FFTW
 
 # reproducibility
 Random.seed!(123)
@@ -139,10 +139,12 @@ xlabel!(p4, "block size m"); ylabel!(p4, "variance"); title!(p4, "variance after
 
 display(plot(p1, p2, p3, p4, layout=(2,2)))
 
+savefig(p1, "plots//additive/trajectories_var.svg")
+savefig(p2, "plots/additive/ACF.svg")
+savefig(p3, "plots/additive/persist.svg")
+savefig(p4, "plots/additive/var_coarse_grain.svg")
 
 #optional
-
-using FFTW   # add this at the top with your other uses
 
 # -------- 3) Power spectral density on log log axes with reference slopes --------
 
@@ -218,3 +220,4 @@ ylabel!(p3, "Power spectral density")
 # ylims!(p3, 1e-10, 1e-4)
 
 display(p3)
+savefig(p3, "plots/additive/PSD.svg")

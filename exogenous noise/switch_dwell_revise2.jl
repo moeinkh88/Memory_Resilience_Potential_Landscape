@@ -101,10 +101,10 @@ end
 
 # ---------- 2) Simulate (shared noise path) ----------
 ξ = make_step_noise(0.0, T_switch, h, σ_add_large; seed=SEED_NOISE)
-F = rhs_with_noise(ξ)
+F_sys = rhs_with_noise(ξ)
 
-t_switch, X_nom = FDEsolver(F, [0.0, T_switch], y0, α_nomem; h=h)
-_,        X_mem = FDEsolver(F, [0.0, T_switch], y0, α_mem;   h=h)
+t_switch, X_nom = FDEsolver(F_sys, [0.0, T_switch], y0, α_nomem; h=h)
+_,        X_mem = FDEsolver(F_sys, [0.0, T_switch], y0, α_mem;   h=h)
 
 x_nom = vec(X_nom)
 x_mem = vec(X_mem)
@@ -151,8 +151,9 @@ end
 
 p1 = plot_panel(t_switch, X_nom, idx_nom; title_str="No memory (α=1.0)")
 p2 = plot_panel(t_switch, X_mem, idx_mem; title_str="With memory (α=$(α_mem))")
-display(plot(p1, p2, layout=(2,1), size=(960,650), legendposition=:topleft))
-
+p1_p2 =plot(p1, p2, layout=(2,1), size=(960,650), legendposition=:topleft)
+display(p1_p2)
+savefig(p1_p2, "plots/additive/trajectories_shifting.png")
 
 # (b) Residency histogram + KDE (steps, truncated at x >= 0)
 if isempty(res_nom_time) || isempty(res_mem_time)
@@ -190,7 +191,7 @@ else
     display(p_res_kde)
 end
 
-
+savefig(p_res_kde, "plots/additive/histogram_additive.svg")
 
 
 # (c) residency survival (time)
@@ -202,3 +203,4 @@ xlabel!(p_surv, "Residency between transitions (time)")
 ylabel!(p_surv, "Survival 1-ECDF")
 title!(p_surv, "Residency survival")
 display(p_surv)
+savefig(p_surv, "plots/additive/survival.svg")

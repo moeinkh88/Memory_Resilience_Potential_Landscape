@@ -300,3 +300,30 @@ for (j, α) in enumerate(orders)
 end
 
 savefig(p, "plots/hysteresis_scatter.png")
+
+
+##
+
+# Improved hysteresis loop: clean trajectories only, updated legend, and arrows for loop direction
+cols = [:firebrick2, :royalblue1]  # red for memory=0 (α=0.75), blue for memory=0.25 (α=1.0)
+p = plot(xlabel="Parameter ρ", ylabel="State A", title="Hysteresis loops", legend=:topleft,
+         xlims=(xmin - pad, xmax + pad), ylims=(0, Ymax + 0.1*Ymax))
+
+# Background equilibria (kept for context, but faint)
+scatter!(p, ρ_stable, A_stable, ms=2, alpha=0.5, color=:gray40, label="stable eq")
+plot!(p, ρ_unstable, A_unstable, lw=1.5, ls=:dash, alpha=0.6, color=:gray50, label="unstable eq")
+
+for (j, α) in enumerate(orders)
+    ρ = rho_at_t_dict[α]
+    A = A_obs_dict[α]
+    mem = 1.0 - α  # α=0.75 → memory=0.25, α=1.0 → memory=0
+    c = cols[j]
+    
+    # Thick solid line for the full time-ordered trajectory (clean and prominent)
+    plot!(p, ρ, A, lw=2.5, color=c, label="memory=$(round(mem, digits=2))", arrow=:head)
+    
+    # Optional: add a second faint line without arrow if you want more emphasis on the path
+    # plot!(p, ρ, A, lw=1, alpha=0.4, color=c, label="", arrow=false)
+end
+
+savefig(p, "plots/hysteresis_clean.svg")
