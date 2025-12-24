@@ -87,5 +87,5 @@ for i = 1:length(pt1)
 end
 
 % Adjust the figure layout for better readability
-sgtitle('Dynamics for Different Perturbation Length and Memory Levels');
+% sgtitle('Dynamics for Different Perturbation Length and Memory Levels');
 
